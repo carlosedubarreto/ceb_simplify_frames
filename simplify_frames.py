@@ -2,156 +2,6 @@ import bpy
 import bpy.types
 import json
 
-bl_info = {
-    "name" : "CEB Simply Frames",
-    "author" : "Carlos Barreto",
-    "description" : "",
-    "blender" : (4, 0, 0),
-    "version" : (2, 1, 0),
-    "location" : "UI > SidePanel",
-    "warning" : "",
-    "category" : "General"
-}
-# 2.1 - Added create markers from keyframes
-#       Added create keyframes where markers are (if there isnt)
-#       Fix the range where the keyframes were deleted (in relation to the markers)
-class SimplifyFrames(bpy.types.Panel):
-    bl_label = "Simplify frames"
-    bl_category = "CEB"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-
-    def draw(self, context):
-        layout = self.layout
-        sfsetting = context.scene.sfsetting
-        obj = context.object
-
-        row = layout.column()
-        # row.prop(sfsetting,'enum_mode')
-        if obj.type == 'ARMATURE':
-            obj_text = "Bones"
-        else:
-            obj_text = "Objects"
-        row.label(text="Simplify "+obj_text)
-        if obj.type == 'ARMATURE':
-            row.operator("ceb.simplifyframes",text="Simplify All Bones").option=1
-            row_slct_bones = row.column(align=True)
-            if context.selected_pose_bones is not None and len(context.selected_pose_bones) > 0:
-                row_slct_bones.enabled = True
-            else:
-                row_slct_bones.enabled = False
-            row_slct_bones.operator("ceb.simplifyframes",text="Simplify Selected Bones").option=2
-        else:
-            row.operator("ceb.simplifyframes",text="Simplify Selected Objs").option=0
-        row.separator()
-        row.operator("ceb.clear_markers")
-        row.operator("ceb.simplify_and_clear_markers")
-        row.separator()
-        row.operator("ceb.create_markers_from_frames")
-        row = layout.column()
-        row.separator()
-        row.label(text="Quick Save/Load")
-        
-        # row = layout.row()
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label1',text='QS 1')
-        if sfsetting.str_qs_label1 != '' or sfsetting.str_quick_save_marker1 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 1').option=1
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker1 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 1').option=1
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=1
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label2',text='QS 2')
-        if sfsetting.str_qs_label2 != '' or sfsetting.str_quick_save_marker2 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 2').option=2
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker2 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 2').option=2
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=2
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label3',text='QS 3')
-        if sfsetting.str_qs_label3 != '' or sfsetting.str_quick_save_marker3 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 3').option=3
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker3 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 3').option=3
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=3
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label4',text='QS 4')
-        if sfsetting.str_qs_label4 != '' or sfsetting.str_quick_save_marker4 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 4').option=4
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker4 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 4').option=4
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=4
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label5',text='QS 5')
-        if sfsetting.str_qs_label5 != '' or sfsetting.str_quick_save_marker5 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 5').option=5
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker5 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 5').option=5
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=5
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label6',text='QS 6')
-        if sfsetting.str_qs_label6 != '' or sfsetting.str_quick_save_marker6 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 6').option=6
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker6 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 6').option=6
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=6
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label7',text='QS 7')
-        if sfsetting.str_qs_label7 != '' or sfsetting.str_quick_save_marker7 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 7').option=7
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker7 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 7').option=7
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=7
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label8',text='QS 8')
-        if sfsetting.str_qs_label8 != '' or sfsetting.str_quick_save_marker8 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 8').option=8
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker8 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 8').option=8
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=8
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label9',text='QS 9')
-        if sfsetting.str_qs_label9 != '' or sfsetting.str_quick_save_marker9 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 9').option=9
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker9 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 9').option=9
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=9
-
-        row = layout.column()
-        row.prop(sfsetting,'str_qs_label10',text='QS 10')
-        if sfsetting.str_qs_label10 != '' or sfsetting.str_quick_save_marker10 != '':
-            row_qs_ql = row.row(align=True)
-            row_qs_ql.operator('ceb.quick_save_markers',text='QS 10').option=10
-            row_ql = row_qs_ql.row(align=True)
-            row_ql.enabled = False if sfsetting.str_quick_save_marker10 == '' else True
-            row_ql.operator('ceb.quick_load_markers',text='QL 10').option=10
-            row_ql.operator('ceb.quick_save_markers_clear',text='X').option=10
 
 class ExtractMarkedFrames(bpy.types.Operator):
     bl_idname = "ceb.simplifyframes"
@@ -249,6 +99,38 @@ class ExtractMarkedFrames(bpy.types.Operator):
                         for kp in fc.keyframe_points:
                             kp.interpolation = 'BEZIER'
 
+        if self.option == 3: #run for selected fcurves
+            # obj = context.active_object
+            # if obj.type == 'ARMATURE':
+
+            #     # save selected bones names
+            #     slcted_bones = []
+            #     for sb in context.selected_pose_bones:
+            #         slcted_bones.append(sb.name)
+
+            from .panel import get_selected_fcurves_from_anywhere
+            selected_curves = get_selected_fcurves_from_anywhere()
+
+            ## Create keyframes where markers are for the current channels of the selected bones
+            for fc in selected_curves:
+                # if fc.data_path.split('"')[1] in slcted_bones:
+                print('bone create missing keyframe:',fc.data_path.split('"')[1])
+                for frame in markers:
+                    fc.keyframe_points.insert(frame, fc.evaluate(frame))
+
+                keyframe_points = fc.keyframe_points
+                for kp in reversed(keyframe_points):
+                    if kp.co[0] not in markers:
+                        keyframe_points.remove(kp)
+                
+
+                #convertendo a interpolação para bezier
+                for fc in selected_curves:
+                    # if fc.data_path.split('"')[1] in slcted_bones:
+                    print('bone to make bezier:',fc.data_path.split('"')[1])
+                    for kp in fc.keyframe_points:
+                        kp.interpolation = 'BEZIER'
+
 
         return{'FINISHED'}
     
@@ -275,36 +157,6 @@ class SimplifyAndClearMarkers(bpy.types.Operator):
 
         return{'FINISHED'}
     
-class SFSettings(bpy.types.PropertyGroup):
-    str_quick_save_marker1: bpy.props.StringProperty(name='Quick Save Marker 1')
-    str_quick_save_marker2: bpy.props.StringProperty(name='Quick Save Marker 2')
-    str_quick_save_marker3: bpy.props.StringProperty(name='Quick Save Marker 3')
-    str_quick_save_marker4: bpy.props.StringProperty(name='Quick Save Marker 4')
-    str_quick_save_marker5: bpy.props.StringProperty(name='Quick Save Marker 5')
-    str_quick_save_marker6: bpy.props.StringProperty(name='Quick Save Marker 6')
-    str_quick_save_marker7: bpy.props.StringProperty(name='Quick Save Marker 7')
-    str_quick_save_marker8: bpy.props.StringProperty(name='Quick Save Marker 8')
-    str_quick_save_marker9: bpy.props.StringProperty(name='Quick Save Marker 9')
-    str_quick_save_marker10: bpy.props.StringProperty(name='Quick Save Marker 10')
-
-    str_qs_label1: bpy.props.StringProperty(name='Quick Save Label 1')
-    str_qs_label2: bpy.props.StringProperty(name='Quick Save Label 2')
-    str_qs_label3: bpy.props.StringProperty(name='Quick Save Label 3')
-    str_qs_label4: bpy.props.StringProperty(name='Quick Save Label 4')
-    str_qs_label5: bpy.props.StringProperty(name='Quick Save Label 5')
-    str_qs_label6: bpy.props.StringProperty(name='Quick Save Label 6')
-    str_qs_label7: bpy.props.StringProperty(name='Quick Save Label 7')
-    str_qs_label8: bpy.props.StringProperty(name='Quick Save Label 8')
-    str_qs_label9: bpy.props.StringProperty(name='Quick Save Label 9')
-    str_qs_label10: bpy.props.StringProperty(name='Quick Save Label 10')
-
-    # enum_mode : bpy.props.EnumProperty(
-    #     name="Mode",
-    #     description="Choose a mode",
-    #     items=[
-    #         ("bone","bone","bone"),
-    #         ("object","object","object"),
-    #     ],)
 
 class CreateMarkersFromFrames(bpy.types.Operator):
     bl_idname = "ceb.create_markers_from_frames"
@@ -476,29 +328,3 @@ class QuickSaveMarkersClear(bpy.types.Operator):
             print("No more banks")
         
         return{'FINISHED'}
-
-def register():
-    bpy.utils.register_class(SimplifyFrames)
-    bpy.utils.register_class(ExtractMarkedFrames)
-    bpy.utils.register_class(ClearMarkers)
-    bpy.utils.register_class(SimplifyAndClearMarkers)
-    bpy.utils.register_class(CreateMarkersFromFrames)
-    bpy.utils.register_class(QuickSaveMarkers)
-    bpy.utils.register_class(QuickLoadMarkers)
-    bpy.utils.register_class(QuickSaveMarkersClear)
-    bpy.utils.register_class(SFSettings)
-    bpy.types.Scene.sfsetting = bpy.props.PointerProperty(type=SFSettings)
-
-def unregister():
-    bpy.utils.unregister_class(SimplifyFrames)
-    bpy.utils.unregister_class(ExtractMarkedFrames)
-    bpy.utils.unregister_class(ClearMarkers)
-    bpy.utils.unregister_class(SimplifyAndClearMarkers)
-    bpy.utils.unregister_class(CreateMarkersFromFrames)
-    bpy.utils.unregister_class(QuickSaveMarkers)
-    bpy.utils.unregister_class(QuickLoadMarkers)
-    bpy.utils.unregister_class(QuickSaveMarkersClear)
-    bpy.utils.unregister_class(SFSettings)
-
-if __name__ == "__main__":
-    register()
