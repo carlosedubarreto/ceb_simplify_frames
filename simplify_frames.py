@@ -3,146 +3,175 @@ import bpy.types
 import json
 
 
+def get_fcurves(obj):
+    """
+    Returns all FCurves for the given object, compatible with Blender 5.0+.
+    In 5.0, fcurves live in ChannelBags inside the action's layers/strips.
+    Falls back to legacy action.fcurves for older versions.
+    """
+    anim_data = obj.animation_data
+    if not anim_data or not anim_data.action:
+        return []
+
+    action = anim_data.action
+
+    # Blender 5.0+: ChannelBag API
+    if hasattr(action, 'layers'):
+        fcurves = []
+        for layer in action.layers:
+            for strip in layer.strips:
+                if hasattr(strip, 'channelbag'):
+                    # single channelbag per strip
+                    cb = strip.channelbag(anim_data.action_slot)
+                    if cb:
+                        fcurves.extend(cb.fcurves)
+                elif hasattr(strip, 'channelbags'):
+                    for cb in strip.channelbags:
+                        fcurves.extend(cb.fcurves)
+        return fcurves
+
+    # Blender 4.x legacy fallback
+    if hasattr(action, 'fcurves'):
+        return list(action.fcurves)
+
+    return []
+
+
+def get_bone_name_from_fcurve(fcurve):
+    """Safely extract bone name from fcurve data_path. Returns None if not a bone curve."""
+    parts = fcurve.data_path.split('"')
+    if len(parts) >= 2:
+        return parts[1]
+    return None
+
+
 class ExtractMarkedFrames(bpy.types.Operator):
     bl_idname = "ceb.simplifyframes"
     bl_label = "Simplify"
     bl_description = "Simplify"
     bl_options = {"REGISTER", "UNDO"}
 
-    option: bpy.props.IntProperty(name='',default=0) #0 for objects, #1 for all bones, #2 for selected bones
+    option: bpy.props.IntProperty(name='', default=0)  # 0=objects, 1=all bones, 2=selected bones, 3=selected fcurves
 
-
-    def execute(self,context):
-        # Pegar frames onde tem marcador
+    def execute(self, context):
         markers = []
         for m in bpy.context.scene.timeline_markers:
             markers.append(m.frame)
-        markers.sort() #order the frames
+        markers.sort()
 
-        # apagar keyframes exceto dos que estao no "markers"
+        if not markers:
+            self.report({'WARNING'}, "No timeline markers found.")
+            return {'CANCELLED'}
 
-        if self.option == 0: #run for objects only
-            #for objects
-            for f in range(markers[0],markers[-1]+1):
-                for ob in context.selected_objects:
-                    # Create keyframes where markers are for the current channels of the object
-                    fcurves = ob.animation_data.action.fcurves
-                    for frame in markers:
-                        for fcurve in fcurves:
-                            keyframe = fcurve.keyframe_points.insert(frame, fcurve.evaluate(frame))
-                    # Remove keyframe that are not at the markers
-                    if f not in markers:
-                        ob.keyframe_delete(data_path='rotation_quaternion',frame=f)
-                        ob.keyframe_delete(data_path='location',frame=f)
-                        ob.keyframe_delete(data_path='rotation_euler',frame=f)
-                        ob.keyframe_delete(data_path='scale',frame=f)
-
-            # convert points to Bezier
+        if self.option == 0:  # objects
             for ob in context.selected_objects:
-                    for fc in ob.animation_data.action.fcurves:
-                        for kp in fc.keyframe_points:
-                            kp.interpolation = 'BEZIER'
+                if not ob.animation_data or not ob.animation_data.action:
+                    continue
+                fcurves = get_fcurves(ob)
 
-        if self.option == 1: #run for all bones
-            obj = context.active_object
-            if obj.type == 'ARMATURE':
-                fcurves = obj.animation_data.action.fcurves
+                # Insert keyframes at markers
                 for frame in markers:
                     for fcurve in fcurves:
-                        keyframe = fcurve.keyframe_points.insert(frame, fcurve.evaluate(frame))
-                for f in range(markers[0],markers[-1]+1):
-                        for bone in obj.pose.bones:
-                            if f not in markers:
-                                bone.keyframe_delete(data_path='rotation_quaternion',frame=f)
-                                bone.keyframe_delete(data_path='location',frame=f)
-                                bone.keyframe_delete(data_path='rotation_euler',frame=f)
-                                bone.keyframe_delete(data_path='scale',frame=f)
+                        fcurve.keyframe_points.insert(frame, fcurve.evaluate(frame))
 
-                # for fc in ob.animation_data.action.fcurves:
-                #convertendo a interpolação para bezier
-                for fc in fcurves:
-                    for kp in fc.keyframe_points:
+                # Remove keyframes outside markers
+                for f in range(markers[0], markers[-1] + 1):
+                    if f not in markers:
+                        ob.keyframe_delete(data_path='rotation_quaternion', frame=f)
+                        ob.keyframe_delete(data_path='location', frame=f)
+                        ob.keyframe_delete(data_path='rotation_euler', frame=f)
+                        ob.keyframe_delete(data_path='scale', frame=f)
+
+                # Set interpolation to Bezier
+                for fcurve in get_fcurves(ob):
+                    for kp in fcurve.keyframe_points:
                         kp.interpolation = 'BEZIER'
 
-        if self.option == 2: #run for selected bones
+        if self.option == 1:  # all bones
             obj = context.active_object
-            if obj.type == 'ARMATURE':
+            if obj and obj.type == 'ARMATURE':
+                fcurves = get_fcurves(obj)
 
-                # save selected bones names
-                slcted_bones = []
-                for sb in context.selected_pose_bones:
-                    slcted_bones.append(sb.name)
+                for frame in markers:
+                    for fcurve in fcurves:
+                        fcurve.keyframe_points.insert(frame, fcurve.evaluate(frame))
 
-                ## Create keyframes where markers are for the current channels of the selected bones
-                for fc in obj.animation_data.action.fcurves:
-                    if fc.data_path.split('"')[1] in slcted_bones:
-                        print('bone create missing keyframe:',fc.data_path.split('"')[1])
+                for f in range(markers[0], markers[-1] + 1):
+                    if f not in markers:
+                        for bone in obj.pose.bones:
+                            bone.keyframe_delete(data_path='rotation_quaternion', frame=f)
+                            bone.keyframe_delete(data_path='location', frame=f)
+                            bone.keyframe_delete(data_path='rotation_euler', frame=f)
+                            bone.keyframe_delete(data_path='scale', frame=f)
+
+                for fcurve in get_fcurves(obj):
+                    for kp in fcurve.keyframe_points:
+                        kp.interpolation = 'BEZIER'
+
+        if self.option == 2:  # selected bones
+            obj = context.active_object
+            if obj and obj.type == 'ARMATURE':
+                selected_bone_names = [sb.name for sb in context.selected_pose_bones]
+                fcurves = get_fcurves(obj)
+
+                # Insert keyframes at markers for selected bones
+                for fcurve in fcurves:
+                    bone_name = get_bone_name_from_fcurve(fcurve)
+                    if bone_name in selected_bone_names:
                         for frame in markers:
-                            fc.keyframe_points.insert(frame, fc.evaluate(frame))
-                
+                            fcurve.keyframe_points.insert(frame, fcurve.evaluate(frame))
 
+                # Remove keyframes outside markers for selected bones
+                for f in range(markers[0], markers[-1] + 1):
+                    if f not in markers:
+                        for bone in context.selected_pose_bones:
+                            bone.keyframe_delete(data_path='rotation_quaternion', frame=f)
+                            bone.keyframe_delete(data_path='location', frame=f)
+                            bone.keyframe_delete(data_path='rotation_euler', frame=f)
+                            bone.keyframe_delete(data_path='scale', frame=f)
 
-
-                # Clear keyframes that are not at the markers
-                for f in range(markers[0],markers[-1]+1):
-                    for bone in context.selected_pose_bones:
-                        if f not in markers:
-                            bone.keyframe_delete(data_path='rotation_quaternion',frame=f)
-                            bone.keyframe_delete(data_path='location',frame=f)
-                            bone.keyframe_delete(data_path='rotation_euler',frame=f)
-                            bone.keyframe_delete(data_path='scale',frame=f)
-
-                #convertendo a interpolação para bezier
-                for fc in obj.animation_data.action.fcurves:
-                    if fc.data_path.split('"')[1] in slcted_bones:
-                        print('bone to make bezier:',fc.data_path.split('"')[1])
-                        for kp in fc.keyframe_points:
+                # Set interpolation to Bezier for selected bones
+                for fcurve in get_fcurves(obj):
+                    bone_name = get_bone_name_from_fcurve(fcurve)
+                    if bone_name in selected_bone_names:
+                        for kp in fcurve.keyframe_points:
                             kp.interpolation = 'BEZIER'
 
-        if self.option == 3: #run for selected fcurves
-            # obj = context.active_object
-            # if obj.type == 'ARMATURE':
-
-            #     # save selected bones names
-            #     slcted_bones = []
-            #     for sb in context.selected_pose_bones:
-            #         slcted_bones.append(sb.name)
-
+        if self.option == 3:  # selected fcurves from graph editor
             from .panel import get_selected_fcurves_from_anywhere
             selected_curves = get_selected_fcurves_from_anywhere()
 
-            ## Create keyframes where markers are for the current channels of the selected bones
+            if not selected_curves:
+                self.report({'WARNING'}, "No F-Curves selected in the Graph Editor.")
+                return {'CANCELLED'}
+
             for fc in selected_curves:
-                # if fc.data_path.split('"')[1] in slcted_bones:
-                print('bone create missing keyframe:',fc.data_path.split('"')[1])
+                # Insert keyframes at markers
                 for frame in markers:
                     fc.keyframe_points.insert(frame, fc.evaluate(frame))
 
-                keyframe_points = fc.keyframe_points
-                for kp in reversed(keyframe_points):
+                # Remove keyframes outside markers
+                for kp in reversed(list(fc.keyframe_points)):
                     if kp.co[0] not in markers:
-                        keyframe_points.remove(kp)
-                
+                        fc.keyframe_points.remove(kp)
 
-                #convertendo a interpolação para bezier
-                for fc in selected_curves:
-                    # if fc.data_path.split('"')[1] in slcted_bones:
-                    print('bone to make bezier:',fc.data_path.split('"')[1])
-                    for kp in fc.keyframe_points:
-                        kp.interpolation = 'BEZIER'
+                # Set interpolation to Bezier
+                for kp in fc.keyframe_points:
+                    kp.interpolation = 'BEZIER'
+
+        return {'FINISHED'}
 
 
-        return{'FINISHED'}
-    
 class ClearMarkers(bpy.types.Operator):
     bl_idname = "ceb.clear_markers"
     bl_label = "Clear Markers"
     bl_description = "Clear Markers"
     bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self,context):
+    def execute(self, context):
         bpy.context.scene.timeline_markers.clear()
-        return{'FINISHED'}
+        return {'FINISHED'}
+
 
 class SimplifyAndClearMarkers(bpy.types.Operator):
     bl_idname = "ceb.simplify_and_clear_markers"
@@ -150,13 +179,11 @@ class SimplifyAndClearMarkers(bpy.types.Operator):
     bl_description = "Simplify and Clear Markers"
     bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self,context):
-
+    def execute(self, context):
         bpy.ops.ceb.simplifyframes()
         bpy.ops.ceb.clear_markers()
+        return {'FINISHED'}
 
-        return{'FINISHED'}
-    
 
 class CreateMarkersFromFrames(bpy.types.Operator):
     bl_idname = "ceb.create_markers_from_frames"
@@ -164,37 +191,30 @@ class CreateMarkersFromFrames(bpy.types.Operator):
     bl_description = "Create Markers From Frames"
     bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self,context):
-
-        #clear markers
+    def execute(self, context):
         bpy.ops.ceb.clear_markers()
 
-        # Get the active object
         obj = bpy.context.object
+        if not obj or not obj.animation_data:
+            self.report({'WARNING'}, "No animation data found on active object.")
+            return {'CANCELLED'}
 
-        # Get the animation data
-        anim_data = obj.animation_data
+        fcurves = get_fcurves(obj)
+        all_frames = []
 
-        # Check if the object has animation data
-        if anim_data is not None:
-            # Get the keyframe points
-            fcurves = anim_data.action.fcurves
-            all_frames = []
-            
-            for fcurve in fcurves:
-                keyframes = fcurve.keyframe_points
-                for keyframe in keyframes:
-                    frame = keyframe.co[0]
-                    all_frames.append(frame)
+        for fcurve in fcurves:
+            for keyframe in fcurve.keyframe_points:
+                all_frames.append(keyframe.co[0])
 
-            print('all_frames: ',all_frames)
-            all_frames.sort()
-            f_keyframes = list(set(all_frames)) #order and distinct 
-            # Create a marker for each keyframe
-            for f_keyframe in f_keyframes:
-                bpy.context.scene.timeline_markers.new(name="F_"+str(int(f_keyframe)), frame=int(f_keyframe))
+        if not all_frames:
+            self.report({'WARNING'}, "No keyframes found.")
+            return {'CANCELLED'}
 
-        return{'FINISHED'}
+        unique_frames = sorted(set(all_frames))
+        for f in unique_frames:
+            bpy.context.scene.timeline_markers.new(name="F_" + str(int(f)), frame=int(f))
+
+        return {'FINISHED'}
 
 
 class QuickSaveMarkers(bpy.types.Operator):
@@ -203,128 +223,67 @@ class QuickSaveMarkers(bpy.types.Operator):
     bl_description = "Quick Save Markers"
     bl_options = {"REGISTER", "UNDO"}
 
-    option: bpy.props.IntProperty(name='',default=1) #escolher qual "bank" salvar
+    option: bpy.props.IntProperty(name='', default=1)
 
-    def execute(self,context):
+    def execute(self, context):
         sfsetting = context.scene.sfsetting
-        
+        markers = [[m.name, m.frame] for m in bpy.context.scene.timeline_markers]
 
-        markers = []
-        for m in bpy.context.scene.timeline_markers:
-            markers.append([m.name,m.frame])
-        if self.option == 1:
-            sfsetting.str_quick_save_marker1 = json.dumps(markers)
-        elif self.option == 2:
-            sfsetting.str_quick_save_marker2 = json.dumps(markers)
-        elif self.option == 3:
-            sfsetting.str_quick_save_marker3 = json.dumps(markers)
-        elif self.option == 4:
-            sfsetting.str_quick_save_marker4 = json.dumps(markers)
-        elif self.option == 5:
-            sfsetting.str_quick_save_marker5 = json.dumps(markers)
-        elif self.option == 6:
-            sfsetting.str_quick_save_marker6 = json.dumps(markers)
-        elif self.option == 7:
-            sfsetting.str_quick_save_marker7 = json.dumps(markers)
-        elif self.option == 8:
-            sfsetting.str_quick_save_marker8 = json.dumps(markers)
-        elif self.option == 9:
-            sfsetting.str_quick_save_marker9 = json.dumps(markers)
-        elif self.option == 10:
-            sfsetting.str_quick_save_marker10 = json.dumps(markers)
+        prop = f'str_quick_save_marker{self.option}'
+        if 1 <= self.option <= 10:
+            setattr(sfsetting, prop, json.dumps(markers))
         else:
-            print('Bank limit')
+            self.report({'WARNING'}, "Bank limit exceeded.")
+
+        return {'FINISHED'}
 
 
-        return{'FINISHED'}
-    
 class QuickLoadMarkers(bpy.types.Operator):
     bl_idname = "ceb.quick_load_markers"
     bl_label = "Quick Load Markers"
     bl_description = "Quick Load Markers"
     bl_options = {"REGISTER", "UNDO"}
 
-    option: bpy.props.IntProperty(name='',default=1) #escolher qual "bank" salvar
+    option: bpy.props.IntProperty(name='', default=1)
 
-    def execute(self,context):
+    def execute(self, context):
         sfsetting = context.scene.sfsetting
+        prop = f'str_quick_save_marker{self.option}'
 
-        if self.option == 1:
-            quick_load = json.loads(sfsetting.str_quick_save_marker1)
-        elif self.option == 2:
-            quick_load = json.loads(sfsetting.str_quick_save_marker2)
-        elif self.option == 3:
-            quick_load = json.loads(sfsetting.str_quick_save_marker3)
-        elif self.option == 4:
-            quick_load = json.loads(sfsetting.str_quick_save_marker4)
-        elif self.option == 5:
-            quick_load = json.loads(sfsetting.str_quick_save_marker5)
-        elif self.option == 6:
-            quick_load = json.loads(sfsetting.str_quick_save_marker6)
-        elif self.option == 7:
-            quick_load = json.loads(sfsetting.str_quick_save_marker7)
-        elif self.option == 8:
-            quick_load = json.loads(sfsetting.str_quick_save_marker8)
-        elif self.option == 9:
-            quick_load = json.loads(sfsetting.str_quick_save_marker9)
-        elif self.option == 10:
-            quick_load = json.loads(sfsetting.str_quick_save_marker10)
-        else:
-            print("No more banks")
+        if not (1 <= self.option <= 10):
+            self.report({'WARNING'}, "No more banks.")
+            return {'CANCELLED'}
 
-        # if sfsetting.bool_clear_before_load_quickload:
+        data = getattr(sfsetting, prop, '')
+        if not data:
+            self.report({'WARNING'}, f"Bank {self.option} is empty.")
+            return {'CANCELLED'}
+
+        quick_load = json.loads(data)
         bpy.context.scene.timeline_markers.clear()
-
         for ql in quick_load:
             context.scene.timeline_markers.new(ql[0], frame=ql[1])
-        
-        return{'FINISHED'}
-    
+
+        return {'FINISHED'}
+
+
 class QuickSaveMarkersClear(bpy.types.Operator):
     bl_idname = "ceb.quick_save_markers_clear"
     bl_label = "Clear Quick Save Markers"
     bl_description = "Clear Quick Save Markers"
     bl_options = {"REGISTER", "UNDO"}
 
-    option: bpy.props.IntProperty(name='',default=0) #0 limpa todos
+    option: bpy.props.IntProperty(name='', default=0)  # 0 = clear all
 
-    def execute(self,context):
+    def execute(self, context):
         sfsetting = context.scene.sfsetting
 
         if self.option == 0:
-            sfsetting.str_quick_save_marker1 = ''
-            sfsetting.str_quick_save_marker2 = ''
-            sfsetting.str_quick_save_marker3 = ''
-            sfsetting.str_quick_save_marker4 = ''
-            sfsetting.str_quick_save_marker5 = ''
-            sfsetting.str_quick_save_marker6 = ''
-            sfsetting.str_quick_save_marker7 = ''
-            sfsetting.str_quick_save_marker8 = ''
-            sfsetting.str_quick_save_marker9 = ''
-            sfsetting.str_quick_save_marker10 = ''
-
-        elif self.option == 1:
-            sfsetting.str_quick_save_marker1 = ''
-        elif self.option == 2:
-            sfsetting.str_quick_save_marker2 = ''
-        elif self.option == 3:
-            sfsetting.str_quick_save_marker3 = ''
-        elif self.option == 4:
-            sfsetting.str_quick_save_marker4 = ''
-        elif self.option == 5:
-            sfsetting.str_quick_save_marker5 = ''
-        elif self.option == 6:
-            sfsetting.str_quick_save_marker6 = ''
-        elif self.option == 7:
-            sfsetting.str_quick_save_marker7 = ''
-        elif self.option == 8:
-            sfsetting.str_quick_save_marker8 = ''
-        elif self.option == 9:
-            sfsetting.str_quick_save_marker9 = ''
-        elif self.option == 10:
-            sfsetting.str_quick_save_marker10 = ''
-
+            for i in range(1, 11):
+                setattr(sfsetting, f'str_quick_save_marker{i}', '')
+        elif 1 <= self.option <= 10:
+            setattr(sfsetting, f'str_quick_save_marker{self.option}', '')
         else:
-            print("No more banks")
-        
-        return{'FINISHED'}
+            self.report({'WARNING'}, "No more banks.")
+
+        return {'FINISHED'}

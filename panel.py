@@ -13,48 +13,73 @@ from bpy.types import (PropertyGroup)
 
 def is_graph_editor_open(context):
     """Checks if any area in the current screen is displaying the Graph Editor."""
-    
-    # Iterate through all screen layouts
     current_screen = context.screen
     for screen in bpy.data.screens:
         if screen == current_screen:
-            # Iterate through all areas in the screen
             for area in screen.areas:
-                # Check the 'type' property of the area
                 if area.type == 'GRAPH_EDITOR':
-                    # print(f"Graph Editor is open in screen: {screen.name}")
                     return True
 
 def get_selected_fcurves_from_anywhere():
     """
     Retrieves selected F-Curves by overriding the context to a Graph Editor area.
     """
-    # 1. Find the first open Graph Editor Area
     graph_area = None
     for area in bpy.context.screen.areas:
         if area.type == 'GRAPH_EDITOR':
             graph_area = area
             break
-    #
+
     if not graph_area:
-        # print("Error: No Graph Editor area is open in the current screen.")
         return []
-    #
-    # 2. Use a Context Override
-    # This temporarily changes the context for the code block inside 'with'
+
     with bpy.context.temp_override(area=graph_area):
-        # Now, this property correctly accesses the selection from the found area
         selected_curves = bpy.context.selected_editable_fcurves
-        #   
         if selected_curves:
-            # print(f"Found {len(selected_curves)} selected F-Curves (via context override).")
-            # Example: Iterate and print their data path
-            # for fcurve in selected_curves:
-            #     print(f"  - {fcurve.data_path}[{fcurve.array_index}]")
             return selected_curves
         else:
-            # print("No F-Curves selected in the Graph Editor.")
             return []
+
+
+def _parse_fcurve_label(fcurve):
+    """
+    Safely parse a bone name, property type, and axis from an FCurve.
+    Returns (bone_or_obj, path_small, axis) strings.
+    """
+    data_path = fcurve.data_path
+    parts = data_path.split('"')
+
+    # Bone curve: pose.bones["BoneName"].location etc.
+    if len(parts) >= 2:
+        bone = parts[1]
+    else:
+        # Object-level curve (no quoted bone name)
+        bone = data_path.split('.')[-1] if '.' in data_path else data_path
+
+    path = data_path.split('.')[-1]
+
+    path_map = {
+        'rotation_quaternion': 'Rot Quat',
+        'location': 'Loc',
+        'rotation_euler': 'Rot Euler',
+        'scale': 'Scale',
+    }
+
+    if path in path_map:
+        path_small = path_map[path]
+    elif len(parts) > 3:
+        path_small = parts[-2]
+    else:
+        path_small = path
+
+    axis = ''
+    if path in ('location', 'rotation_euler', 'scale'):
+        axis = {0: 'X', 1: 'Y', 2: 'Z'}.get(fcurve.array_index, str(fcurve.array_index))
+    elif path == 'rotation_quaternion':
+        axis = {0: 'W', 1: 'X', 2: 'Y', 3: 'Z'}.get(fcurve.array_index, str(fcurve.array_index))
+
+    return bone, path_small, axis
+
 
 class SimplifyFrames(bpy.types.Panel):
     bl_label = "Simplify frames"
@@ -68,7 +93,6 @@ class SimplifyFrames(bpy.types.Panel):
         obj = context.object
 
         row = layout.column()
-        # row.prop(sfsetting,'enum_mode')
         if obj and obj.type == 'ARMATURE':
             obj_text = "Bones"
         else:
@@ -99,155 +123,31 @@ class SimplifyFrames(bpy.types.Panel):
             col.label(text='Graph Editor Option')
             col.operator("ceb.simplifyframes",text="Simplify Selected Fcurves").option=3
             selected_curves = get_selected_fcurves_from_anywhere()
-            path_small = ''
-            axis= ''
             if selected_curves:
                 col.label(text='Selected Curves')
                 for fcurve in selected_curves:
-                    bone = fcurve.data_path.split('"')[1]
-                    path = fcurve.data_path.split('.')[-1]
-                    if path == 'rotation_quaternion':
-                        path_small = 'Rot Quat'
-                    elif path == 'location':
-                        path_small = 'Loc'
-                    elif path == 'rotation_euler':
-                        path_small = 'Rot Euler'
-                    elif path == 'scale':
-                        path_small = 'Scale'
-                    elif len(fcurve.data_path.split('"')) > 3:
-                        path_small = fcurve.data_path.split('"')[-2]
-                    else:
-                        path_small = path
-                    if path in  ['location','rotation_euler','scale','rotation_quaternion']:
-                        if path in  ['location','rotation_euler','scale']:
-                            if fcurve.array_index == 0:
-                                axis = 'X'
-                            elif fcurve.array_index == 1:
-                                axis = 'Y'
-                            elif fcurve.array_index == 2:
-                                axis = 'Z'
-                            else:
-                                axis = str(fcurve.array_index)
-                        elif path == 'rotation_quaternion':
-                            if fcurve.array_index == 0:
-                                axis = 'W'
-                            elif fcurve.array_index == 1:
-                                axis = 'X'
-                            elif fcurve.array_index == 2:
-                                axis = 'Y'
-                            elif fcurve.array_index == 3:
-                                axis = 'Z'
-                            else:
-                                axis = str(fcurve.array_index)
-                        
-                    col.label(text=f'{bone}-{path_small}-{axis}')
-                    
-
+                    try:
+                        bone, path_small, axis = _parse_fcurve_label(fcurve)
+                        col.label(text=f'{bone}-{path_small}-{axis}')
+                    except Exception:
+                        col.label(text=fcurve.data_path)
 
         if sfsetting.bool_show_quick_save_markers:
             row.separator()
             row.label(text="Quick Save/Load")
-            
-            # row = layout.row()
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label1',text='QS 1')
-            if sfsetting.str_qs_label1 != '' or sfsetting.str_quick_save_marker1 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 1').option=1
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker1 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 1').option=1
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=1
 
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label2',text='QS 2')
-            if sfsetting.str_qs_label2 != '' or sfsetting.str_quick_save_marker2 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 2').option=2
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker2 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 2').option=2
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=2
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label3',text='QS 3')
-            if sfsetting.str_qs_label3 != '' or sfsetting.str_quick_save_marker3 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 3').option=3
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker3 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 3').option=3
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=3
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label4',text='QS 4')
-            if sfsetting.str_qs_label4 != '' or sfsetting.str_quick_save_marker4 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 4').option=4
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker4 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 4').option=4
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=4
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label5',text='QS 5')
-            if sfsetting.str_qs_label5 != '' or sfsetting.str_quick_save_marker5 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 5').option=5
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker5 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 5').option=5
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=5
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label6',text='QS 6')
-            if sfsetting.str_qs_label6 != '' or sfsetting.str_quick_save_marker6 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 6').option=6
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker6 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 6').option=6
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=6
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label7',text='QS 7')
-            if sfsetting.str_qs_label7 != '' or sfsetting.str_quick_save_marker7 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 7').option=7
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker7 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 7').option=7
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=7
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label8',text='QS 8')
-            if sfsetting.str_qs_label8 != '' or sfsetting.str_quick_save_marker8 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 8').option=8
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker8 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 8').option=8
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=8
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label9',text='QS 9')
-            if sfsetting.str_qs_label9 != '' or sfsetting.str_quick_save_marker9 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 9').option=9
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker9 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 9').option=9
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=9
-
-            row = layout.column()
-            row.prop(sfsetting,'str_qs_label10',text='QS 10')
-            if sfsetting.str_qs_label10 != '' or sfsetting.str_quick_save_marker10 != '':
-                row_qs_ql = row.row(align=True)
-                row_qs_ql.operator('ceb.quick_save_markers',text='QS 10').option=10
-                row_ql = row_qs_ql.row(align=True)
-                row_ql.enabled = False if sfsetting.str_quick_save_marker10 == '' else True
-                row_ql.operator('ceb.quick_load_markers',text='QL 10').option=10
-                row_ql.operator('ceb.quick_save_markers_clear',text='X').option=10
+            for i in range(1, 11):
+                label_prop = f'str_qs_label{i}'
+                marker_prop = f'str_quick_save_marker{i}'
+                row = layout.column()
+                row.prop(sfsetting, label_prop, text=f'QS {i}')
+                if getattr(sfsetting, label_prop) != '' or getattr(sfsetting, marker_prop) != '':
+                    row_qs_ql = row.row(align=True)
+                    row_qs_ql.operator('ceb.quick_save_markers', text=f'QS {i}').option = i
+                    row_ql = row_qs_ql.row(align=True)
+                    row_ql.enabled = False if getattr(sfsetting, marker_prop) == '' else True
+                    row_ql.operator('ceb.quick_load_markers', text=f'QL {i}').option = i
+                    row_ql.operator('ceb.quick_save_markers_clear', text='X').option = i
 
 
 class SFSettings(bpy.types.PropertyGroup):
@@ -273,11 +173,3 @@ class SFSettings(bpy.types.PropertyGroup):
     str_qs_label8: bpy.props.StringProperty(name='Quick Save Label 8') # type:ignore
     str_qs_label9: bpy.props.StringProperty(name='Quick Save Label 9') # type:ignore
     str_qs_label10: bpy.props.StringProperty(name='Quick Save Label 10') # type:ignore
-
-    # enum_mode : bpy.props.EnumProperty(
-    #     name="Mode",
-    #     description="Choose a mode",
-    #     items=[
-    #         ("bone","bone","bone"),
-    #         ("object","object","object"),
-    #     ],)

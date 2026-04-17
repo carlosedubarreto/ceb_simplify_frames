@@ -10,14 +10,13 @@ bl_info = {
     "name" : "CEB Simply Frames",
     "author" : "Carlos Barreto",
     "description" : "",
-    "blender" : (4, 0, 0),
+    "blender" : (5, 0, 0),
     "version" : (2, 2, 0),
     "location" : "UI > SidePanel",
     "warning" : "",
     "category" : "General"
 }
-# 2.2 - alterei a arquiterua para multiplos arquivos
-    # - prentendo colocar uma função para identificar quais fcurves para atuar, se usuario tiver com graph editor aberto
+# 2.3 - update pra rodar no blender 5x
 
 classes = (
     SimplifyFrames,
